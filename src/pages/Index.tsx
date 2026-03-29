@@ -714,7 +714,7 @@ export default function Index() {
     <div className="flex h-screen w-screen overflow-hidden mesh-bg">
 
       {/* ── Sidebar ───────────────────────────────────────── */}
-      <aside className={`flex flex-col border-r border-border/40 bg-card/50 backdrop-blur-xl z-10 transition-all duration-300 ${activeChatId ? "w-0 overflow-hidden border-r-0" : "w-[252px]"} sm:w-[252px] sm:overflow-visible sm:border-r`}>
+      <aside className={`flex flex-col border-r border-border/40 bg-card/50 backdrop-blur-xl z-10 transition-all duration-300 ${activeChatId ? "w-0 overflow-hidden border-r-0" : "w-full"} sm:w-[252px] sm:overflow-visible sm:border-r`}>
         <div className="w-[252px] flex flex-col h-full">
           {/* Logo */}
           <div className="px-4 pt-5 pb-4 border-b border-border/30">
@@ -828,39 +828,21 @@ export default function Index() {
         </div>
       </aside>
 
-      {/* ── Right panel ───────────────────────────────────── */}
-      <main className="flex-1 overflow-hidden flex flex-col">
-        {activeChatId && activeChat ? (
-          <ChatView
-            chat={activeChat}
-            chars={chars}
-            globalActiveId={activeId}
-            globalActiveKind={activeKind}
-            anonLevel={anonLevel}
-            onBack={() => setActiveChatId(null)}
-            onUpdate={updateChat}
-            onSetActive={setActiveSender}
-            onAnonChange={setAnonLevel}
-            onCreateChar={createChar}
-          />
-        ) : (
-          /* Empty state — only shown on sm+ when no chat is open */
-          <div className="hidden sm:flex flex-1 flex-col items-center justify-center gap-5 animate-fade-in">
-            <div className="text-center">
-              <div className="font-display text-xl font-bold text-foreground/10 tracking-[0.3em] mb-3">WHISPER</div>
-              <div className="text-sm font-mono text-muted-foreground/30">
-                {chats.length === 0 ? "создай переписку, чтобы начать историю" : "выбери переписку слева"}
-              </div>
-            </div>
-            {chats.length === 0 && (
-              <button onClick={() => setModal("newChat")}
-                className="px-5 py-2.5 rounded-xl border border-primary/30 bg-primary/10 text-primary text-xs font-display font-semibold hover:bg-primary/20 transition-all">
-                Создать переписку
-              </button>
-            )}
-          </div>
-        )}
-      </main>
+      {/* ── Chat (full-screen overlay) ────────────────────── */}
+      {activeChatId && activeChat && (
+        <ChatView
+          chat={activeChat}
+          chars={chars}
+          globalActiveId={activeId}
+          globalActiveKind={activeKind}
+          anonLevel={anonLevel}
+          onBack={() => setActiveChatId(null)}
+          onUpdate={updateChat}
+          onSetActive={setActiveSender}
+          onAnonChange={setAnonLevel}
+          onCreateChar={createChar}
+        />
+      )}
 
       {/* ── Global modals ─────────────────────────────────── */}
       {modal === "newChat"  && <NewChatModal  onClose={() => setModal(null)} onCreate={createChat}  chars={chars} />}
