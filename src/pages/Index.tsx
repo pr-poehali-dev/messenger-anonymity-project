@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import Icon from "@/components/ui/icon";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -22,517 +22,738 @@ type Message = {
 type Chat = {
   id: string;
   name: string;
-  lastMsg: string;
-  ts: string;
-  unread: number;
-  bg: string;
-  isGroup: boolean;
+  bg: BgKey;
   messages: Message[];
+  createdAt: string;
 };
 
 type AnonLevel = "full" | "partial" | "none";
+type BgKey = "void" | "fog" | "blood" | "forest" | "dusk" | "abyss";
+type Tab = "chats" | "chars";
 
-// ─── Data ────────────────────────────────────────────────────────────────────
+// ─── Constants ───────────────────────────────────────────────────────────────
 
-const BACKGROUNDS = [
-  { id: "default", label: "🌑 Тьма" },
-  { id: "fog", label: "🌫 Туман" },
-  { id: "blood", label: "🩸 Кровь" },
-  { id: "forest", label: "🌲 Лес" },
-  { id: "void", label: "✨ Пустота" },
+const EMOJI_OPTIONS = ["👤", "👻", "🕵️", "🧛", "🐺", "🌙", "💀", "🔮", "🧟", "🦇", "🌲", "🧕", "🧙", "🐉", "🎭", "🦊", "🕷", "🌊"];
+
+const PALETTE = ["#c084fc", "#4ade80", "#fb923c", "#60a5fa", "#f472b6", "#34d399", "#fbbf24", "#a78bfa", "#f87171", "#38bdf8"];
+
+const BG_OPTIONS: { id: BgKey; label: string; icon: string; class: string }[] = [
+  { id: "void",   label: "Пустота",  icon: "✦", class: "bg-gradient-to-br from-black via-slate-950 to-black" },
+  { id: "fog",    label: "Туман",    icon: "≋", class: "bg-gradient-to-br from-slate-900 via-slate-700/80 to-slate-900" },
+  { id: "blood",  label: "Кровь",    icon: "◈", class: "bg-gradient-to-br from-red-950 via-rose-900/90 to-stone-950" },
+  { id: "forest", label: "Лес",      icon: "❧", class: "bg-gradient-to-br from-green-950 via-emerald-900/80 to-stone-950" },
+  { id: "dusk",   label: "Сумерки",  icon: "◎", class: "bg-gradient-to-br from-indigo-950 via-purple-900/70 to-black" },
+  { id: "abyss",  label: "Бездна",   icon: "⊗", class: "bg-gradient-to-br from-zinc-950 via-neutral-900 to-zinc-950" },
 ];
 
-const INIT_CHARACTERS: Character[] = [
-  { id: "c1", name: "Мария Климова", emoji: "🧕", color: "#c084fc", mask: "Незнакомка" },
-  { id: "c2", name: "Дух леса", emoji: "🌲", color: "#4ade80", mask: "Природа" },
-  { id: "c3", name: "Детектив Орлов", emoji: "🕵️", color: "#fb923c", mask: "Следователь" },
-];
-
-const INIT_CHATS: Chat[] = [
-  {
-    id: "ch1", name: "Ночной лес", lastMsg: "Ты слышишь шёпот деревьев?",
-    ts: "23:47", unread: 3, bg: "default", isGroup: true,
-    messages: [
-      { id: "m1", text: "Ты слышишь шёпот деревьев?", characterId: "c2", ts: "23:47", isOwn: false },
-      { id: "m2", text: "Я чувствую что-то... необычное", characterId: "c1", ts: "23:48", isOwn: true },
-      { id: "m3", text: "Это я. Я здесь уже давно.", characterId: "c2", ts: "23:49", isOwn: false },
-    ]
-  },
-  {
-    id: "ch2", name: "Таинственный незнакомец", lastMsg: "Не открывай дверь",
-    ts: "01:13", unread: 1, bg: "blood", isGroup: false,
-    messages: [
-      { id: "m4", text: "Не открывай дверь", characterId: "c3", ts: "01:13", isOwn: false },
-      { id: "m5", text: "Почему? Кто там?", characterId: "c1", ts: "01:14", isOwn: true },
-    ]
-  },
-  {
-    id: "ch3", name: "Группа выживших", lastMsg: "Нас осталось трое",
-    ts: "вчера", unread: 0, bg: "fog", isGroup: true,
-    messages: [
-      { id: "m6", text: "Нас осталось трое", characterId: "c3", ts: "вчера", isOwn: false },
-    ]
-  },
+const ANON_OPTIONS: { id: AnonLevel; label: string; sub: string; icon: string }[] = [
+  { id: "full",    label: "Аноним",  sub: "никто не знает кто ты",        icon: "EyeOff" },
+  { id: "partial", label: "Маска",   sub: "видят имя персонажа, не тебя", icon: "Glasses" },
+  { id: "none",    label: "Открыто", sub: "все видят настоящее имя",      icon: "Eye" },
 ];
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-const BG_CLASSES: Record<string, string> = {
-  default: "mesh-bg",
-  fog: "bg-gradient-to-br from-slate-900 via-slate-700 to-slate-900",
-  blood: "bg-gradient-to-br from-red-950 via-rose-900 to-stone-950",
-  forest: "bg-gradient-to-br from-green-950 via-emerald-900 to-stone-950",
-  void: "bg-gradient-to-br from-black via-indigo-950 to-black",
-};
+function getBgClass(key: BgKey) {
+  return BG_OPTIONS.find(b => b.id === key)?.class ?? BG_OPTIONS[0].class;
+}
 
-const ANON_LABELS: Record<AnonLevel, string> = {
-  full: "Полная анонимность",
-  partial: "Маска персонажа",
-  none: "Открытый профиль",
-};
-const ANON_DESC: Record<AnonLevel, string> = {
-  full: "Никто не видит кто ты — только текст",
-  partial: "Видят имя маски, но не твоё",
-  none: "Все видят твоё настоящее имя",
-};
-const ANON_COLORS: Record<AnonLevel, string> = {
-  full: "text-purple-400 border-purple-400/40 bg-purple-400/10",
-  partial: "text-amber-400 border-amber-400/40 bg-amber-400/10",
-  none: "text-emerald-400 border-emerald-400/40 bg-emerald-400/10",
-};
+function formatTime(date = new Date()) {
+  return date.toLocaleTimeString("ru", { hour: "2-digit", minute: "2-digit" });
+}
 
-// ─── Sub-components ───────────────────────────────────────────────────────────
+function lastMsg(chat: Chat) {
+  const m = chat.messages[chat.messages.length - 1];
+  return m ? m.text : "пока тихо...";
+}
 
-function SpookyDecor() {
+function lastTs(chat: Chat) {
+  const m = chat.messages[chat.messages.length - 1];
+  return m ? m.ts : chat.createdAt;
+}
+
+// ─── Empty State ──────────────────────────────────────────────────────────────
+
+function EmptyState({ type, onAction }: { type: "chats" | "chars"; onAction: () => void }) {
   return (
-    <div className="pointer-events-none absolute inset-0 overflow-hidden">
-      <div className="absolute top-8 right-8 text-4xl opacity-10 animate-float" style={{ animationDelay: "0s" }}>👁</div>
-      <div className="absolute top-1/3 left-4 text-2xl opacity-5 animate-float" style={{ animationDelay: "1s" }}>🕸</div>
-      <div className="absolute bottom-16 right-12 text-3xl opacity-5 animate-float" style={{ animationDelay: "2s" }}>🦇</div>
-      <div className="absolute top-1/2 right-6 text-xl opacity-5 animate-float" style={{ animationDelay: "0.5s" }}>☽</div>
+    <div className="flex flex-col items-center justify-center h-full gap-4 px-6 py-12 animate-fade-in">
+      <div className="text-4xl opacity-20 animate-float">
+        {type === "chats" ? "💬" : "🎭"}
+      </div>
+      <div className="text-center">
+        <div className="text-xs font-mono text-muted-foreground/50 mb-3">
+          {type === "chats" ? "нет переписок" : "нет персонажей"}
+        </div>
+        <button
+          onClick={onAction}
+          className="px-4 py-2 rounded-xl border border-dashed border-border/50 text-xs font-mono text-muted-foreground hover:text-foreground hover:border-primary/40 transition-all duration-200 flex items-center gap-2 mx-auto"
+        >
+          <Icon name="Plus" size={13} />
+          {type === "chats" ? "создать переписку" : "создать персонажа"}
+        </button>
+      </div>
     </div>
   );
 }
 
-function AnonBadge({ level }: { level: AnonLevel }) {
-  const icons: Record<AnonLevel, string> = { full: "EyeOff", partial: "Glasses", none: "Eye" };
+// ─── Modal wrapper ────────────────────────────────────────────────────────────
+
+function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) {
   return (
-    <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full border text-xs font-mono ${ANON_COLORS[level]}`}>
-      <Icon name={icons[level]} size={10} />
-      {ANON_LABELS[level]}
-    </span>
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm"
+      onClick={e => e.target === e.currentTarget && onClose()}
+    >
+      <div className="w-[340px] max-w-[calc(100vw-2rem)] bg-popover border border-border/60 rounded-2xl p-5 animate-scale-in shadow-2xl">
+        <div className="flex items-center justify-between mb-5">
+          <span className="font-display text-xs font-bold text-foreground tracking-wider uppercase">{title}</span>
+          <button onClick={onClose} className="text-muted-foreground hover:text-foreground transition-colors">
+            <Icon name="X" size={15} />
+          </button>
+        </div>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+// ─── New Chat Modal ───────────────────────────────────────────────────────────
+
+function NewChatModal({ onClose, onCreate }: { onClose: () => void; onCreate: (name: string, bg: BgKey) => void }) {
+  const [name, setName] = useState("");
+  const [bg, setBg] = useState<BgKey>("void");
+  const inputRef = useRef<HTMLInputElement>(null);
+  useEffect(() => { inputRef.current?.focus(); }, []);
+
+  return (
+    <Modal title="Новая переписка" onClose={onClose}>
+      <div className="space-y-4">
+        <div>
+          <label className="text-xs text-muted-foreground font-mono mb-1.5 block">Название</label>
+          <input
+            ref={inputRef}
+            value={name}
+            onChange={e => setName(e.target.value)}
+            onKeyDown={e => e.key === "Enter" && name.trim() && onCreate(name.trim(), bg)}
+            placeholder="Ночной лес, Подвал, Чердак..."
+            className="w-full bg-secondary/40 border border-border/40 rounded-xl px-3 py-2.5 text-sm font-mono outline-none focus:border-primary/50 transition-colors placeholder:text-muted-foreground/40"
+          />
+        </div>
+        <div>
+          <label className="text-xs text-muted-foreground font-mono mb-1.5 block">Атмосфера</label>
+          <div className="grid grid-cols-3 gap-2">
+            {BG_OPTIONS.map(opt => (
+              <button
+                key={opt.id}
+                onClick={() => setBg(opt.id)}
+                className={`py-2 rounded-xl text-xs font-mono transition-all flex flex-col items-center gap-1 ${
+                  bg === opt.id
+                    ? "bg-primary/20 border border-primary/50 text-primary"
+                    : "bg-secondary/30 border border-border/30 text-muted-foreground hover:border-border/60 hover:text-foreground"
+                }`}
+              >
+                <span className="text-base">{opt.icon}</span>
+                <span>{opt.label}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+        <button
+          onClick={() => name.trim() && onCreate(name.trim(), bg)}
+          disabled={!name.trim()}
+          className="w-full py-2.5 bg-primary text-primary-foreground rounded-xl text-xs font-display font-bold tracking-wide uppercase transition-all hover:opacity-90 disabled:opacity-30 disabled:cursor-not-allowed"
+        >
+          Создать
+        </button>
+      </div>
+    </Modal>
+  );
+}
+
+// ─── New Char Modal ───────────────────────────────────────────────────────────
+
+function NewCharModal({ onClose, onCreate, charCount }: { onClose: () => void; onCreate: (c: Omit<Character, "id">) => void; charCount: number }) {
+  const [name, setName] = useState("");
+  const [mask, setMask] = useState("");
+  const [emoji, setEmoji] = useState("👤");
+  const inputRef = useRef<HTMLInputElement>(null);
+  useEffect(() => { inputRef.current?.focus(); }, []);
+
+  function submit() {
+    if (!name.trim()) return;
+    onCreate({
+      name: name.trim(),
+      mask: mask.trim() || name.trim(),
+      emoji,
+      color: PALETTE[charCount % PALETTE.length],
+    });
+  }
+
+  return (
+    <Modal title="Новый персонаж" onClose={onClose}>
+      <div className="space-y-4">
+        <div>
+          <label className="text-xs text-muted-foreground font-mono mb-1.5 block">Аватар</label>
+          <div className="flex flex-wrap gap-1.5">
+            {EMOJI_OPTIONS.map(e => (
+              <button
+                key={e}
+                onClick={() => setEmoji(e)}
+                className={`w-9 h-9 rounded-xl text-xl flex items-center justify-center transition-all ${
+                  emoji === e ? "bg-primary/25 border border-primary/50" : "bg-secondary/30 hover:bg-secondary/60 border border-transparent"
+                }`}
+              >
+                {e}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div>
+          <label className="text-xs text-muted-foreground font-mono mb-1.5 block">Настоящее имя</label>
+          <input
+            ref={inputRef}
+            value={name}
+            onChange={e => setName(e.target.value)}
+            onKeyDown={e => e.key === "Enter" && submit()}
+            placeholder="Имя, которое знаешь только ты"
+            className="w-full bg-secondary/40 border border-border/40 rounded-xl px-3 py-2.5 text-sm font-mono outline-none focus:border-primary/50 transition-colors placeholder:text-muted-foreground/40"
+          />
+        </div>
+        <div>
+          <label className="text-xs text-muted-foreground font-mono mb-1.5 block">
+            Имя маски <span className="text-muted-foreground/40">(для анонимности)</span>
+          </label>
+          <input
+            value={mask}
+            onChange={e => setMask(e.target.value)}
+            onKeyDown={e => e.key === "Enter" && submit()}
+            placeholder="Тёмная Странница, Наблюдатель..."
+            className="w-full bg-secondary/40 border border-border/40 rounded-xl px-3 py-2.5 text-sm font-mono outline-none focus:border-primary/50 transition-colors placeholder:text-muted-foreground/40"
+          />
+        </div>
+        <button
+          onClick={submit}
+          disabled={!name.trim()}
+          className="w-full py-2.5 bg-primary text-primary-foreground rounded-xl text-xs font-display font-bold tracking-wide uppercase transition-all hover:opacity-90 disabled:opacity-30 disabled:cursor-not-allowed"
+        >
+          Создать
+        </button>
+      </div>
+    </Modal>
+  );
+}
+
+// ─── Chat Settings Modal ──────────────────────────────────────────────────────
+
+function ChatSettingsModal({ chat, onClose, onSave }: { chat: Chat; onClose: () => void; onSave: (name: string, bg: BgKey) => void }) {
+  const [name, setName] = useState(chat.name);
+  const [bg, setBg] = useState<BgKey>(chat.bg);
+  const inputRef = useRef<HTMLInputElement>(null);
+  useEffect(() => { inputRef.current?.focus(); }, []);
+
+  return (
+    <Modal title="Настройки переписки" onClose={onClose}>
+      <div className="space-y-4">
+        <div>
+          <label className="text-xs text-muted-foreground font-mono mb-1.5 block">Название</label>
+          <input
+            ref={inputRef}
+            value={name}
+            onChange={e => setName(e.target.value)}
+            onKeyDown={e => e.key === "Enter" && name.trim() && onSave(name.trim(), bg)}
+            className="w-full bg-secondary/40 border border-border/40 rounded-xl px-3 py-2.5 text-sm font-mono outline-none focus:border-primary/50 transition-colors"
+          />
+        </div>
+        <div>
+          <label className="text-xs text-muted-foreground font-mono mb-1.5 block">Атмосфера</label>
+          <div className="grid grid-cols-3 gap-2">
+            {BG_OPTIONS.map(opt => (
+              <button
+                key={opt.id}
+                onClick={() => setBg(opt.id)}
+                className={`py-2 rounded-xl text-xs font-mono transition-all flex flex-col items-center gap-1 ${
+                  bg === opt.id
+                    ? "bg-primary/20 border border-primary/50 text-primary"
+                    : "bg-secondary/30 border border-border/30 text-muted-foreground hover:border-border/60 hover:text-foreground"
+                }`}
+              >
+                <span className="text-base">{opt.icon}</span>
+                <span>{opt.label}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+        <button
+          onClick={() => name.trim() && onSave(name.trim(), bg)}
+          disabled={!name.trim()}
+          className="w-full py-2.5 bg-primary text-primary-foreground rounded-xl text-xs font-display font-bold tracking-wide uppercase transition-all hover:opacity-90 disabled:opacity-30"
+        >
+          Сохранить
+        </button>
+      </div>
+    </Modal>
+  );
+}
+
+// ─── Char + Anon Panel ────────────────────────────────────────────────────────
+
+function CharPanel({
+  chars, activeCharId, anonLevel, onClose, onSelectChar, onAnonChange, onNewChar,
+}: {
+  chars: Character[];
+  activeCharId: string | null;
+  anonLevel: AnonLevel;
+  onClose: () => void;
+  onSelectChar: (id: string) => void;
+  onAnonChange: (l: AnonLevel) => void;
+  onNewChar: () => void;
+}) {
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm"
+      onClick={e => e.target === e.currentTarget && onClose()}
+    >
+      <div className="w-full sm:w-[340px] max-w-full bg-popover border border-border/60 rounded-t-2xl sm:rounded-2xl p-5 animate-scale-in shadow-2xl">
+        <div className="flex items-center justify-between mb-4">
+          <span className="font-display text-xs font-bold tracking-wider uppercase">Персонаж</span>
+          <button onClick={onClose} className="text-muted-foreground hover:text-foreground"><Icon name="X" size={15} /></button>
+        </div>
+
+        {chars.length > 0 && (
+          <div className="space-y-1.5 mb-4">
+            {chars.map(char => (
+              <button
+                key={char.id}
+                onClick={() => onSelectChar(char.id)}
+                className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl border transition-all ${
+                  activeCharId === char.id
+                    ? "border-primary/40 bg-primary/10"
+                    : "border-border/25 hover:border-border/50 bg-secondary/20"
+                }`}
+              >
+                <div
+                  className="w-8 h-8 rounded-xl flex items-center justify-center text-base shrink-0"
+                  style={{ background: char.color + "20", border: `1px solid ${char.color}40` }}
+                >
+                  {char.emoji}
+                </div>
+                <div className="flex-1 text-left min-w-0">
+                  <div className="text-xs font-display font-semibold truncate">{char.name}</div>
+                  <div className="text-[10px] text-muted-foreground/50 font-mono">маска: {char.mask}</div>
+                </div>
+                {activeCharId === char.id && <div className="w-1.5 h-1.5 rounded-full bg-primary shrink-0 animate-pulse-glow" />}
+              </button>
+            ))}
+          </div>
+        )}
+
+        <div className="border-t border-border/30 pt-4">
+          <div className="text-[10px] font-mono text-muted-foreground/40 mb-2 uppercase tracking-widest">Как тебя видят</div>
+          <div className="grid grid-cols-3 gap-1.5">
+            {ANON_OPTIONS.map(opt => (
+              <button
+                key={opt.id}
+                onClick={() => { onAnonChange(opt.id); onClose(); }}
+                className={`py-2.5 px-2 rounded-xl border text-[10px] font-mono transition-all flex flex-col items-center gap-1 ${
+                  anonLevel === opt.id
+                    ? "border-primary/50 bg-primary/15 text-primary"
+                    : "border-border/25 text-muted-foreground hover:border-border/50 hover:text-foreground"
+                }`}
+              >
+                <Icon name={opt.icon} size={13} />
+                <span>{opt.label}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <button
+          onClick={onNewChar}
+          className="mt-3 w-full py-2 rounded-xl border border-dashed border-border/40 text-[11px] font-mono text-muted-foreground hover:text-foreground hover:border-primary/30 transition-all flex items-center justify-center gap-1.5"
+        >
+          <Icon name="Plus" size={12} />
+          новый персонаж
+        </button>
+      </div>
+    </div>
   );
 }
 
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
 export default function Index() {
-  const [tab, setTab] = useState<"chats" | "chars">("chats");
-  const [activeChat, setActiveChat] = useState<Chat | null>(null);
-  const [chats, setChats] = useState<Chat[]>(INIT_CHATS);
-  const [characters, setCharacters] = useState<Character[]>(INIT_CHARACTERS);
-  const [activeCharId, setActiveCharId] = useState("c1");
-  const [inputText, setInputText] = useState("");
-  const [chatBg, setChatBg] = useState("default");
-  const [showBgPicker, setShowBgPicker] = useState(false);
-  const [showAnonPanel, setShowAnonPanel] = useState(false);
+  const [tab, setTab] = useState<Tab>("chats");
+  const [chats, setChats] = useState<Chat[]>([]);
+  const [chars, setChars] = useState<Character[]>([]);
+  const [activeChatId, setActiveChatId] = useState<string | null>(null);
+  const [activeCharId, setActiveCharId] = useState<string | null>(null);
   const [anonLevel, setAnonLevel] = useState<AnonLevel>("partial");
-  const [showCharPanel, setShowCharPanel] = useState(false);
-  const [showNewChar, setShowNewChar] = useState(false);
-  const [newCharName, setNewCharName] = useState("");
-  const [newCharEmoji, setNewCharEmoji] = useState("👤");
-  const [newCharMask, setNewCharMask] = useState("");
+  const [inputText, setInputText] = useState("");
+  const [modal, setModal] = useState<"newChat" | "newChar" | "chatSettings" | "charPanel" | null>(null);
 
-  const activeChar = characters.find(c => c.id === activeCharId) ?? characters[0];
+  const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  function openChat(chat: Chat) {
-    setActiveChat(chat);
-    setChatBg(chat.bg);
-    setChats(prev => prev.map(c => c.id === chat.id ? { ...c, unread: 0 } : c));
-    setShowBgPicker(false);
-    setShowAnonPanel(false);
-    setShowCharPanel(false);
+  const activeChat = chats.find(c => c.id === activeChatId) ?? null;
+  const activeChar = chars.find(c => c.id === activeCharId) ?? null;
+
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [activeChat?.messages.length]);
+
+  function createChat(name: string, bg: BgKey) {
+    const id = `chat-${Date.now()}`;
+    setChats(prev => [...prev, { id, name, bg, messages: [], createdAt: formatTime() }]);
+    setActiveChatId(id);
+    setModal(null);
+  }
+
+  function createChar(data: Omit<Character, "id">) {
+    const id = `char-${Date.now()}`;
+    setChars(prev => [...prev, { id, ...data }]);
+    if (!activeCharId) setActiveCharId(id);
+    setModal(null);
   }
 
   function sendMessage() {
-    if (!inputText.trim() || !activeChat) return;
+    if (!inputText.trim() || !activeChatId || !activeCharId) return;
     const msg: Message = {
-      id: `m${Date.now()}`,
+      id: `msg-${Date.now()}`,
       text: inputText.trim(),
       characterId: activeCharId,
-      ts: new Date().toLocaleTimeString("ru", { hour: "2-digit", minute: "2-digit" }),
+      ts: formatTime(),
       isOwn: true,
     };
-    const updated = chats.map(c =>
-      c.id === activeChat.id
-        ? { ...c, messages: [...c.messages, msg], lastMsg: msg.text, ts: msg.ts }
-        : c
-    );
-    setChats(updated);
-    setActiveChat(updated.find(c => c.id === activeChat.id) ?? null);
+    setChats(prev => prev.map(c =>
+      c.id === activeChatId ? { ...c, messages: [...c.messages, msg] } : c
+    ));
     setInputText("");
   }
 
-  function addCharacter() {
-    if (!newCharName.trim()) return;
-    const palette = ["#c084fc", "#4ade80", "#fb923c", "#60a5fa", "#f472b6", "#34d399"];
-    const nc: Character = {
-      id: `c${Date.now()}`,
-      name: newCharName.trim(),
-      emoji: newCharEmoji,
-      color: palette[characters.length % palette.length],
-      mask: newCharMask.trim() || "Неизвестный",
-    };
-    setCharacters(prev => [...prev, nc]);
-    setNewCharName(""); setNewCharEmoji("👤"); setNewCharMask("");
-    setShowNewChar(false);
+  function deleteChat(id: string) {
+    setChats(prev => prev.filter(c => c.id !== id));
+    if (activeChatId === id) setActiveChatId(null);
+  }
+
+  function deleteChar(id: string) {
+    setChars(prev => prev.filter(c => c.id !== id));
+    if (activeCharId === id) {
+      const remaining = chars.filter(c => c.id !== id);
+      setActiveCharId(remaining[0]?.id ?? null);
+    }
+  }
+
+  function saveChatSettings(name: string, bg: BgKey) {
+    setChats(prev => prev.map(c => c.id === activeChatId ? { ...c, name, bg } : c));
+    setModal(null);
   }
 
   function getSenderLabel(msg: Message) {
-    const char = characters.find(c => c.id === msg.characterId);
+    const char = chars.find(c => c.id === msg.characterId);
     if (!char) return "???";
     if (!msg.isOwn) return char.name;
     if (anonLevel === "full") return "Аноним";
-    if (anonLevel === "partial") return char.mask;
+    if (anonLevel === "partial") return char.mask || char.name;
     return char.name;
   }
 
-  const bgClass = BG_CLASSES[chatBg] ?? BG_CLASSES.default;
-  const closeDropdowns = () => { setShowBgPicker(false); setShowAnonPanel(false); setShowCharPanel(false); };
+  const canSend = inputText.trim().length > 0 && !!activeChatId && !!activeCharId;
 
   return (
-    <div className="flex h-screen w-screen overflow-hidden mesh-bg relative">
-      <SpookyDecor />
+    <div className="flex h-screen w-screen overflow-hidden mesh-bg">
 
-      {/* ── Sidebar ─────────────────────────────────────── */}
-      <aside className="relative z-10 flex flex-col w-72 shrink-0 border-r border-border/50 bg-card/60 backdrop-blur-xl">
+      {/* ── Sidebar ──────────────────────────────────────── */}
+      <aside className="flex flex-col w-[252px] shrink-0 border-r border-border/40 bg-card/50 backdrop-blur-xl z-10">
+
         {/* Logo */}
-        <div className="px-5 py-4 border-b border-border/40">
-          <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-xl bg-primary/20 border border-primary/40 flex items-center justify-center animate-pulse-glow">
-              <span className="text-lg">👁</span>
+        <div className="px-4 pt-5 pb-4 border-b border-border/30">
+          <div className="flex items-center gap-2.5">
+            <div className="w-8 h-8 rounded-lg bg-primary/15 border border-primary/30 flex items-center justify-center animate-pulse-glow shrink-0">
+              <span className="text-sm">👁</span>
             </div>
             <div>
-              <div className="font-display text-sm font-bold text-primary tracking-widest">WHISPER</div>
-              <div className="text-xs text-muted-foreground font-mono">страшные переписки</div>
+              <div className="font-display text-[11px] font-bold text-primary tracking-[0.2em]">WHISPER</div>
+              <div className="text-[10px] text-muted-foreground/50 font-mono leading-none mt-0.5">анонимный мессенджер</div>
             </div>
           </div>
         </div>
 
         {/* Tabs */}
-        <div className="flex mx-4 mt-3 bg-secondary/40 rounded-xl p-1 gap-1">
-          {(["chats", "chars"] as const).map(t => (
+        <div className="flex px-3 pt-3 pb-1 gap-1">
+          {(["chats", "chars"] as Tab[]).map(t => (
             <button
               key={t}
               onClick={() => setTab(t)}
-              className={`flex-1 py-1.5 rounded-lg text-xs font-display font-semibold transition-all duration-200 ${
-                tab === t
-                  ? "bg-primary text-primary-foreground shadow-lg"
-                  : "text-muted-foreground hover:text-foreground"
+              className={`flex-1 py-1.5 rounded-lg text-[11px] font-display font-semibold transition-all ${
+                tab === t ? "bg-primary/20 text-primary" : "text-muted-foreground hover:text-foreground"
               }`}
             >
-              {t === "chats" ? "💬 Чаты" : "🎭 Персонажи"}
+              {t === "chats" ? "Чаты" : "Персонажи"}
             </button>
           ))}
         </div>
 
         {/* List */}
-        <div className="flex-1 overflow-y-auto mt-2 px-2">
+        <div className="flex-1 overflow-y-auto px-2 py-1 min-h-0">
           {tab === "chats" && (
-            <div className="space-y-1 py-1">
-              {chats.map((chat, i) => (
-                <button
-                  key={chat.id}
-                  onClick={() => openChat(chat)}
-                  className={`w-full text-left px-3 py-3 rounded-xl transition-all duration-200 animate-fade-in ${
-                    activeChat?.id === chat.id
-                      ? "bg-primary/15 border border-primary/30"
-                      : "hover:bg-secondary/60 border border-transparent"
-                  }`}
-                  style={{ animationDelay: `${i * 0.05}s`, opacity: 0, animationFillMode: "forwards" }}
-                >
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-2xl bg-muted/60 flex items-center justify-center text-lg shrink-0">
-                      {chat.isGroup ? "👥" : "👤"}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center justify-between">
-                        <span className="font-display text-xs font-semibold truncate">{chat.name}</span>
-                        <span className="text-xs text-muted-foreground ml-1 shrink-0">{chat.ts}</span>
+            chats.length === 0
+              ? <EmptyState type="chats" onAction={() => setModal("newChat")} />
+              : (
+                <div className="space-y-0.5 py-1">
+                  {chats.map((chat, i) => (
+                    <div
+                      key={chat.id}
+                      className={`group relative flex items-center gap-2.5 px-3 py-2.5 rounded-xl cursor-pointer transition-all duration-150 animate-fade-in ${
+                        activeChatId === chat.id
+                          ? "bg-primary/12 border border-primary/25"
+                          : "hover:bg-secondary/50 border border-transparent"
+                      }`}
+                      style={{ animationDelay: `${i * 0.04}s`, opacity: 0, animationFillMode: "forwards" }}
+                      onClick={() => setActiveChatId(chat.id)}
+                    >
+                      <div className="w-8 h-8 rounded-xl bg-muted/40 flex items-center justify-center shrink-0 text-sm font-mono">
+                        {BG_OPTIONS.find(b => b.id === chat.bg)?.icon ?? "✦"}
                       </div>
-                      <div className="flex items-center justify-between mt-0.5">
-                        <span className="text-xs text-muted-foreground truncate">{chat.lastMsg}</span>
-                        {chat.unread > 0 && (
-                          <span className="ml-1 shrink-0 w-4 h-4 rounded-full bg-primary text-primary-foreground text-xs flex items-center justify-center font-bold">
-                            {chat.unread}
-                          </span>
-                        )}
+                      <div className="flex-1 min-w-0">
+                        <div className="text-[11px] font-display font-semibold truncate">{chat.name}</div>
+                        <div className="text-[10px] text-muted-foreground/50 font-mono truncate mt-0.5">{lastMsg(chat)}</div>
+                      </div>
+                      <div className="flex flex-col items-end gap-1 shrink-0">
+                        <span className="text-[9px] text-muted-foreground/35 font-mono">{lastTs(chat)}</span>
+                        <button
+                          onClick={e => { e.stopPropagation(); deleteChat(chat.id); }}
+                          className="opacity-0 group-hover:opacity-100 text-muted-foreground/40 hover:text-destructive transition-all"
+                        >
+                          <Icon name="Trash2" size={11} />
+                        </button>
                       </div>
                     </div>
-                  </div>
-                </button>
-              ))}
-            </div>
+                  ))}
+                </div>
+              )
           )}
 
           {tab === "chars" && (
-            <div className="space-y-2 px-1 py-1">
-              {characters.map((char, i) => (
-                <div
-                  key={char.id}
-                  onClick={() => setActiveCharId(char.id)}
-                  className={`p-3 rounded-xl border cursor-pointer transition-all duration-200 animate-fade-in ${
-                    activeCharId === char.id
-                      ? "border-primary/50 bg-primary/10"
-                      : "border-border/30 hover:border-border/60 bg-secondary/20"
-                  }`}
-                  style={{ animationDelay: `${i * 0.06}s`, opacity: 0, animationFillMode: "forwards" }}
-                >
-                  <div className="flex items-center gap-3">
+            chars.length === 0
+              ? <EmptyState type="chars" onAction={() => setModal("newChar")} />
+              : (
+                <div className="space-y-0.5 py-1">
+                  {chars.map((char, i) => (
                     <div
-                      className="w-10 h-10 rounded-2xl flex items-center justify-center text-xl shrink-0"
-                      style={{ backgroundColor: char.color + "25", border: `1px solid ${char.color}50` }}
+                      key={char.id}
+                      className={`group flex items-center gap-2.5 px-3 py-2.5 rounded-xl cursor-pointer transition-all duration-150 animate-fade-in ${
+                        activeCharId === char.id
+                          ? "bg-primary/12 border border-primary/25"
+                          : "hover:bg-secondary/50 border border-transparent"
+                      }`}
+                      style={{ animationDelay: `${i * 0.04}s`, opacity: 0, animationFillMode: "forwards" }}
+                      onClick={() => setActiveCharId(char.id)}
                     >
-                      {char.emoji}
+                      <div
+                        className="w-8 h-8 rounded-xl flex items-center justify-center text-base shrink-0"
+                        style={{ background: char.color + "20", border: `1px solid ${char.color}40` }}
+                      >
+                        {char.emoji}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="text-[11px] font-display font-semibold truncate">{char.name}</div>
+                        <div className="text-[10px] text-muted-foreground/50 font-mono truncate">маска: {char.mask}</div>
+                      </div>
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        {activeCharId === char.id && (
+                          <div className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse-glow" />
+                        )}
+                        <button
+                          onClick={e => { e.stopPropagation(); deleteChar(char.id); }}
+                          className="opacity-0 group-hover:opacity-100 text-muted-foreground/40 hover:text-destructive transition-all"
+                        >
+                          <Icon name="Trash2" size={11} />
+                        </button>
+                      </div>
                     </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="font-display text-xs font-semibold truncate">{char.name}</div>
-                      <div className="text-xs text-muted-foreground">маска: <span className="text-foreground/70">{char.mask}</span></div>
-                    </div>
-                    {activeCharId === char.id && (
-                      <div className="w-2 h-2 rounded-full bg-primary animate-pulse-glow shrink-0" />
-                    )}
-                  </div>
+                  ))}
                 </div>
-              ))}
-              <button
-                onClick={() => setShowNewChar(true)}
-                className="w-full py-3 rounded-xl border border-dashed border-border/40 text-xs text-muted-foreground hover:text-foreground hover:border-primary/40 transition-all duration-200 font-mono flex items-center justify-center gap-2"
-              >
-                <Icon name="Plus" size={14} />
-                новый персонаж
-              </button>
-            </div>
+              )
           )}
         </div>
 
-        {/* Active char */}
-        <div className="px-4 py-3 border-t border-border/40">
-          <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-secondary/40">
-            <span className="text-base shrink-0">{activeChar.emoji}</span>
-            <div className="flex-1 min-w-0 overflow-hidden">
-              <div className="text-xs font-display font-semibold truncate">{activeChar.name}</div>
-              <AnonBadge level={anonLevel} />
+        {/* Add button */}
+        <div className="px-3 py-3 border-t border-border/30">
+          <button
+            onClick={() => setModal(tab === "chats" ? "newChat" : "newChar")}
+            className="w-full flex items-center justify-center gap-1.5 py-2 rounded-xl border border-dashed border-border/40 text-[11px] font-mono text-muted-foreground hover:text-foreground hover:border-primary/40 transition-all"
+          >
+            <Icon name="Plus" size={12} />
+            {tab === "chats" ? "новый чат" : "новый персонаж"}
+          </button>
+        </div>
+
+        {/* Active char footer */}
+        {activeChar && (
+          <div
+            className="mx-3 mb-3 px-3 py-2.5 rounded-xl bg-secondary/40 border border-border/25 cursor-pointer hover:border-primary/30 transition-colors"
+            onClick={() => setModal("charPanel")}
+          >
+            <div className="flex items-center gap-2">
+              <span className="text-base shrink-0">{activeChar.emoji}</span>
+              <div className="flex-1 min-w-0">
+                <div className="text-[11px] font-mono font-semibold truncate">{activeChar.name}</div>
+                <div className="text-[9px] text-muted-foreground/45 font-mono">
+                  {anonLevel === "full" ? "режим: аноним" : anonLevel === "partial" ? `маска: ${activeChar.mask}` : "режим: открыто"}
+                </div>
+              </div>
+              <Icon name="ChevronUp" size={12} className="text-muted-foreground/35 shrink-0" />
             </div>
           </div>
-        </div>
+        )}
       </aside>
 
-      {/* ── Chat Area ───────────────────────────────────── */}
-      <main className="relative flex-1 flex flex-col overflow-hidden">
+      {/* ── Chat Area ────────────────────────────────────── */}
+      <main className="flex-1 flex flex-col overflow-hidden relative">
+
         {!activeChat ? (
-          <div className="flex-1 flex items-center justify-center">
-            <div className="text-center animate-fade-in">
-              <div className="text-7xl mb-5 animate-float">🌑</div>
-              <div className="font-display text-2xl text-primary mb-2 text-glow">Выбери переписку</div>
-              <div className="text-sm text-muted-foreground font-mono">или создай новую историю</div>
-              <div className="mt-6 flex items-center justify-center gap-2 text-muted-foreground/40">
-                <span className="text-2xl animate-float" style={{ animationDelay: "0.2s" }}>👻</span>
-                <span className="text-2xl animate-float" style={{ animationDelay: "0.8s" }}>🕯</span>
-                <span className="text-2xl animate-float" style={{ animationDelay: "1.4s" }}>🌙</span>
+          <div className="flex-1 flex flex-col items-center justify-center gap-5 animate-fade-in">
+            <div className="text-center">
+              <div className="font-display text-xl font-bold text-foreground/10 tracking-[0.3em] mb-3">WHISPER</div>
+              <div className="text-sm font-mono text-muted-foreground/35">
+                {chats.length === 0
+                  ? "создай переписку, чтобы начать историю"
+                  : "выбери переписку слева"}
               </div>
             </div>
+            {chats.length === 0 && (
+              <button
+                onClick={() => setModal("newChat")}
+                className="px-5 py-2.5 rounded-xl border border-primary/30 bg-primary/10 text-primary text-xs font-display font-semibold hover:bg-primary/20 transition-all"
+              >
+                Создать переписку
+              </button>
+            )}
           </div>
         ) : (
           <>
-            {/* Chat bg layer */}
-            <div className={`absolute inset-0 ${bgClass} transition-all duration-700`} />
+            {/* Bg layer */}
+            <div className={`absolute inset-0 ${getBgClass(activeChat.bg)} transition-all duration-500`} />
 
             {/* Header */}
-            <header className="relative z-10 flex items-center justify-between px-5 py-3 bg-background/50 backdrop-blur-xl border-b border-border/30">
-              <div className="flex items-center gap-3">
-                <button
-                  onClick={() => setActiveChat(null)}
-                  className="text-muted-foreground hover:text-foreground transition-colors"
-                >
-                  <Icon name="ArrowLeft" size={18} />
-                </button>
-                <div>
-                  <div className="font-display text-sm font-bold">{activeChat.name}</div>
-                  <div className="text-xs text-muted-foreground font-mono">
-                    {activeChat.isGroup ? "группа · " : "личный · "}
-                    {activeChat.messages.length} сообщений
-                  </div>
+            <header className="relative z-10 flex items-center justify-between px-5 py-3 bg-background/40 backdrop-blur-xl border-b border-border/25">
+              <div>
+                <span className="font-display text-sm font-bold">{activeChat.name}</span>
+                <div className="text-[10px] font-mono text-muted-foreground/45 mt-0.5">
+                  {activeChat.messages.length === 0 ? "пока тихо" : `${activeChat.messages.length} сообщ.`}
                 </div>
               </div>
 
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-1.5">
                 <button
-                  onClick={() => { setShowAnonPanel(v => !v); setShowCharPanel(false); setShowBgPicker(false); }}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-mono transition-all ${
-                    showAnonPanel ? "bg-primary/20 border-primary/50 text-primary" : "border-border/40 text-muted-foreground hover:text-foreground"
-                  }`}
+                  onClick={() => setModal("charPanel")}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-border/30 text-[11px] font-mono text-muted-foreground hover:text-foreground hover:border-border/60 transition-all"
                 >
-                  <Icon name="EyeOff" size={13} />
-                  Анонимность
+                  <Icon name={anonLevel === "full" ? "EyeOff" : anonLevel === "partial" ? "Glasses" : "Eye"} size={12} />
+                  {activeChar ? (
+                    <span className="hidden sm:inline">
+                      {anonLevel === "full" ? "аноним" : anonLevel === "partial" ? activeChar.mask : activeChar.name}
+                    </span>
+                  ) : (
+                    <span>персонаж</span>
+                  )}
                 </button>
-
                 <button
-                  onClick={() => { setShowCharPanel(v => !v); setShowAnonPanel(false); setShowBgPicker(false); }}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-mono transition-all ${
-                    showCharPanel ? "bg-accent/20 border-accent/50 text-accent-foreground" : "border-border/40 text-muted-foreground hover:text-foreground"
-                  }`}
+                  onClick={() => setModal("chatSettings")}
+                  className="w-8 h-8 rounded-lg border border-border/30 flex items-center justify-center text-muted-foreground hover:text-foreground hover:border-border/60 transition-all"
                 >
-                  <span>{activeChar.emoji}</span>
-                  {activeChar.name}
-                </button>
-
-                <button
-                  onClick={() => { setShowBgPicker(v => !v); setShowAnonPanel(false); setShowCharPanel(false); }}
-                  className={`w-8 h-8 rounded-xl border flex items-center justify-center transition-colors ${
-                    showBgPicker ? "border-primary/50 text-primary bg-primary/10" : "border-border/40 text-muted-foreground hover:text-foreground"
-                  }`}
-                >
-                  <Icon name="Palette" size={15} />
+                  <Icon name="Settings2" size={13} />
                 </button>
               </div>
             </header>
 
-            {/* Anon Panel */}
-            {showAnonPanel && (
-              <div className="absolute top-[61px] right-40 z-30 w-72 bg-popover border border-border/60 rounded-2xl shadow-2xl p-4 animate-scale-in backdrop-blur-xl">
-                <div className="font-display text-xs font-bold mb-3 text-primary">Уровень анонимности</div>
-                <div className="space-y-2">
-                  {(["full", "partial", "none"] as AnonLevel[]).map(lvl => (
-                    <button
-                      key={lvl}
-                      onClick={() => { setAnonLevel(lvl); setShowAnonPanel(false); }}
-                      className={`w-full text-left p-3 rounded-xl border transition-all ${
-                        anonLevel === lvl ? ANON_COLORS[lvl] : "border-border/30 hover:border-border/60"
-                      }`}
-                    >
-                      <div className="text-xs font-display font-semibold mb-0.5">{ANON_LABELS[lvl]}</div>
-                      <div className="text-xs text-muted-foreground">{ANON_DESC[lvl]}</div>
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* Char switcher Panel */}
-            {showCharPanel && (
-              <div className="absolute top-[61px] right-20 z-30 w-64 bg-popover border border-border/60 rounded-2xl shadow-2xl p-4 animate-scale-in backdrop-blur-xl">
-                <div className="font-display text-xs font-bold mb-3 text-foreground">Писать от лица</div>
-                <div className="space-y-2">
-                  {characters.map(char => (
-                    <button
-                      key={char.id}
-                      onClick={() => { setActiveCharId(char.id); setShowCharPanel(false); }}
-                      className={`w-full text-left p-2.5 rounded-xl border transition-all flex items-center gap-3 ${
-                        activeCharId === char.id
-                          ? "border-primary/50 bg-primary/10"
-                          : "border-border/30 hover:border-border/60"
-                      }`}
-                    >
-                      <span className="text-xl">{char.emoji}</span>
-                      <div>
-                        <div className="text-xs font-display font-semibold">{char.name}</div>
-                        <div className="text-xs text-muted-foreground">маска: {char.mask}</div>
-                      </div>
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* Bg Picker */}
-            {showBgPicker && (
-              <div className="absolute top-[61px] right-4 z-30 bg-popover border border-border/60 rounded-2xl shadow-2xl p-3 animate-scale-in backdrop-blur-xl">
-                <div className="font-display text-xs font-bold mb-2 text-muted-foreground">Атмосфера</div>
-                <div className="flex flex-col gap-1">
-                  {BACKGROUNDS.map(bg => (
-                    <button
-                      key={bg.id}
-                      onClick={() => {
-                        setChatBg(bg.id);
-                        setChats(prev => prev.map(c => c.id === activeChat.id ? { ...c, bg: bg.id } : c));
-                        setActiveChat(prev => prev ? { ...prev, bg: bg.id } : prev);
-                        setShowBgPicker(false);
-                      }}
-                      className={`px-4 py-2 rounded-xl text-xs font-mono text-left transition-all ${
-                        chatBg === bg.id
-                          ? "bg-primary/20 text-primary border border-primary/40"
-                          : "hover:bg-secondary/60 text-muted-foreground border border-transparent"
-                      }`}
-                    >
-                      {bg.label}
-                    </button>
-                  ))}
-                </div>
+            {/* No char warning */}
+            {!activeChar && (
+              <div className="relative z-10 mx-4 mt-3 px-4 py-2.5 rounded-xl bg-amber-500/8 border border-amber-500/25 flex items-center gap-3 animate-fade-in">
+                <Icon name="AlertTriangle" size={13} className="text-amber-400/70 shrink-0" />
+                <span className="text-[11px] font-mono text-amber-300/60 flex-1">Создай персонажа, чтобы писать</span>
+                <button
+                  onClick={() => { setModal("newChar"); setTab("chars"); }}
+                  className="text-[11px] font-mono text-amber-400/80 hover:text-amber-300 underline shrink-0"
+                >
+                  создать
+                </button>
               </div>
             )}
 
             {/* Messages */}
-            <div
-              className="relative z-10 flex-1 overflow-y-auto px-4 py-4 space-y-3"
-              onClick={closeDropdowns}
-            >
-              {activeChat.messages.map((msg, i) => {
-                const char = characters.find(c => c.id === msg.characterId);
-                const label = getSenderLabel(msg);
-                return (
-                  <div
-                    key={msg.id}
-                    className={`flex ${msg.isOwn ? "justify-end" : "justify-start"} animate-message-in`}
-                    style={{ animationDelay: `${i * 0.04}s`, opacity: 0, animationFillMode: "forwards" }}
-                  >
-                    <div className={`max-w-xs lg:max-w-md flex flex-col gap-1 ${msg.isOwn ? "items-end" : "items-start"}`}>
-                      <div className="flex items-center gap-1.5 px-1">
-                        {!msg.isOwn && <span className="text-sm">{char?.emoji}</span>}
-                        <span
-                          className="text-xs font-display font-semibold"
-                          style={{ color: msg.isOwn ? "hsl(var(--primary))" : (char?.color ?? "hsl(var(--muted-foreground))") }}
-                        >
-                          {label}
-                        </span>
-                        {msg.isOwn && <span className="text-sm">{char?.emoji}</span>}
-                      </div>
+            <div className="relative z-10 flex-1 overflow-y-auto px-4 py-4">
+              {activeChat.messages.length === 0 ? (
+                <div className="flex flex-col items-center justify-center h-full gap-2 opacity-20">
+                  <div className="text-3xl animate-float">{BG_OPTIONS.find(b => b.id === activeChat.bg)?.icon ?? "✦"}</div>
+                  <span className="text-xs font-mono text-muted-foreground">начни историю...</span>
+                </div>
+              ) : (
+                <div className="space-y-2.5 max-w-2xl mx-auto">
+                  {activeChat.messages.map((msg, i) => {
+                    const char = chars.find(c => c.id === msg.characterId);
+                    const label = getSenderLabel(msg);
+                    return (
                       <div
-                        className={`px-4 py-2.5 rounded-2xl text-sm font-mono leading-relaxed ${
-                          msg.isOwn
-                            ? "bg-primary/20 border border-primary/30 text-foreground rounded-tr-sm"
-                            : "bg-card/80 border border-border/40 backdrop-blur-sm text-foreground rounded-tl-sm"
-                        }`}
+                        key={msg.id}
+                        className={`flex ${msg.isOwn ? "justify-end" : "justify-start"} animate-message-in`}
+                        style={{ animationDelay: `${Math.min(i * 0.03, 0.3)}s`, opacity: 0, animationFillMode: "forwards" }}
                       >
-                        {msg.text}
+                        <div className={`flex flex-col gap-0.5 max-w-[75%] ${msg.isOwn ? "items-end" : "items-start"}`}>
+                          <div className="flex items-center gap-1.5 px-1">
+                            {!msg.isOwn && char && <span className="text-xs">{char.emoji}</span>}
+                            <span
+                              className="text-[10px] font-mono font-medium"
+                              style={{ color: char?.color ?? "hsl(var(--muted-foreground))" }}
+                            >
+                              {label}
+                            </span>
+                            {msg.isOwn && char && <span className="text-xs">{char.emoji}</span>}
+                          </div>
+                          <div className={`px-3.5 py-2.5 rounded-2xl text-[13px] font-mono leading-relaxed ${
+                            msg.isOwn
+                              ? "bg-primary/20 border border-primary/25 text-foreground rounded-tr-sm"
+                              : "bg-card/75 border border-border/30 backdrop-blur-sm text-foreground rounded-tl-sm"
+                          }`}>
+                            {msg.text}
+                          </div>
+                          <span className="text-[9px] text-muted-foreground/30 px-1">{msg.ts}</span>
+                        </div>
                       </div>
-                      <span className="text-xs text-muted-foreground/60 px-1">{msg.ts}</span>
-                    </div>
-                  </div>
-                );
-              })}
+                    );
+                  })}
+                  <div ref={messagesEndRef} />
+                </div>
+              )}
             </div>
 
             {/* Input */}
-            <div className="relative z-10 px-4 py-3 bg-background/50 backdrop-blur-xl border-t border-border/30">
-              <div className="flex items-center gap-2">
-                <div className="flex-1 flex items-center gap-2 bg-card/60 border border-border/40 rounded-2xl px-4 py-2.5 focus-within:border-primary/50 transition-colors">
-                  <span className="text-base shrink-0">{activeChar.emoji}</span>
+            <div className="relative z-10 px-4 py-3 bg-background/40 backdrop-blur-xl border-t border-border/25">
+              <div className="flex items-center gap-2 max-w-2xl mx-auto">
+                {activeChar && (
+                  <span className="text-lg shrink-0 opacity-60 select-none">{activeChar.emoji}</span>
+                )}
+                <div className="flex-1 flex items-center bg-card/60 border border-border/35 rounded-xl px-4 py-2.5 gap-2 focus-within:border-primary/40 transition-colors">
                   <input
                     type="text"
                     value={inputText}
                     onChange={e => setInputText(e.target.value)}
                     onKeyDown={e => e.key === "Enter" && !e.shiftKey && sendMessage()}
-                    placeholder={`Пишет ${anonLevel === "full" ? "Аноним" : anonLevel === "partial" ? activeChar.mask : activeChar.name}...`}
-                    className="flex-1 bg-transparent text-sm font-mono outline-none placeholder:text-muted-foreground/50"
+                    disabled={!activeChar}
+                    placeholder={
+                      !activeChar ? "сначала создай персонажа..." :
+                      anonLevel === "full" ? "аноним пишет..." :
+                      anonLevel === "partial" ? `${activeChar.mask} пишет...` :
+                      `${activeChar.name} пишет...`
+                    }
+                    className="flex-1 bg-transparent text-sm font-mono outline-none placeholder:text-muted-foreground/30 disabled:cursor-not-allowed"
                   />
                 </div>
                 <button
                   onClick={sendMessage}
-                  disabled={!inputText.trim()}
-                  className="w-10 h-10 rounded-xl bg-primary text-primary-foreground flex items-center justify-center transition-all hover:bg-primary/80 disabled:opacity-40 disabled:cursor-not-allowed"
+                  disabled={!canSend}
+                  className="w-9 h-9 shrink-0 rounded-xl bg-primary text-primary-foreground flex items-center justify-center transition-all hover:opacity-80 disabled:opacity-20 disabled:cursor-not-allowed"
                 >
-                  <Icon name="Send" size={16} />
+                  <Icon name="Send" size={14} />
                 </button>
               </div>
             </div>
@@ -540,70 +761,26 @@ export default function Index() {
         )}
       </main>
 
-      {/* ── New Character Modal ──────────────────────────── */}
-      {showNewChar && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm"
-          onClick={e => e.target === e.currentTarget && setShowNewChar(false)}
-        >
-          <div className="w-80 bg-popover border border-border/60 rounded-2xl p-5 animate-scale-in">
-            <div className="flex items-center justify-between mb-4">
-              <div className="font-display text-sm font-bold text-primary">Новый персонаж</div>
-              <button onClick={() => setShowNewChar(false)} className="text-muted-foreground hover:text-foreground">
-                <Icon name="X" size={16} />
-              </button>
-            </div>
-
-            <div className="space-y-3">
-              <div>
-                <label className="text-xs text-muted-foreground font-mono mb-1 block">Выбери эмодзи</label>
-                <div className="flex gap-2 flex-wrap">
-                  {["👤", "👻", "🕵️", "🧛", "🐺", "🌙", "💀", "🔮", "🧟", "🦇", "🌲", "🧕"].map(e => (
-                    <button
-                      key={e}
-                      onClick={() => setNewCharEmoji(e)}
-                      className={`w-9 h-9 rounded-xl text-xl transition-all ${
-                        newCharEmoji === e ? "bg-primary/20 border border-primary/50" : "bg-secondary/40 hover:bg-secondary/70"
-                      }`}
-                    >
-                      {e}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div>
-                <label className="text-xs text-muted-foreground font-mono mb-1 block">Настоящее имя</label>
-                <input
-                  type="text"
-                  value={newCharName}
-                  onChange={e => setNewCharName(e.target.value)}
-                  placeholder="Анастасия Климова"
-                  className="w-full bg-secondary/40 border border-border/40 rounded-xl px-3 py-2 text-sm font-mono outline-none focus:border-primary/50 transition-colors"
-                />
-              </div>
-
-              <div>
-                <label className="text-xs text-muted-foreground font-mono mb-1 block">Имя маски (анонимное)</label>
-                <input
-                  type="text"
-                  value={newCharMask}
-                  onChange={e => setNewCharMask(e.target.value)}
-                  placeholder="Тёмная Странница"
-                  className="w-full bg-secondary/40 border border-border/40 rounded-xl px-3 py-2 text-sm font-mono outline-none focus:border-primary/50 transition-colors"
-                />
-              </div>
-
-              <button
-                onClick={addCharacter}
-                disabled={!newCharName.trim()}
-                className="w-full py-2.5 bg-primary text-primary-foreground rounded-xl font-display text-sm font-semibold transition-all hover:bg-primary/80 disabled:opacity-40 disabled:cursor-not-allowed"
-              >
-                Создать персонажа
-              </button>
-            </div>
-          </div>
-        </div>
+      {/* ── Modals ───────────────────────────────────────── */}
+      {modal === "newChat" && (
+        <NewChatModal onClose={() => setModal(null)} onCreate={createChat} />
+      )}
+      {modal === "newChar" && (
+        <NewCharModal onClose={() => setModal(null)} onCreate={createChar} charCount={chars.length} />
+      )}
+      {modal === "chatSettings" && activeChat && (
+        <ChatSettingsModal chat={activeChat} onClose={() => setModal(null)} onSave={saveChatSettings} />
+      )}
+      {modal === "charPanel" && (
+        <CharPanel
+          chars={chars}
+          activeCharId={activeCharId}
+          anonLevel={anonLevel}
+          onClose={() => setModal(null)}
+          onSelectChar={id => { setActiveCharId(id); setModal(null); }}
+          onAnonChange={setAnonLevel}
+          onNewChar={() => setModal("newChar")}
+        />
       )}
     </div>
   );
